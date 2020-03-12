@@ -20,7 +20,7 @@ Please follow the `make_dataset.ipynb` or `make_dataset.py`to generate the groun
 
 ## Training Process
 
-Try `python train.py train.json val.json 0 0` to start training process.
+Try `python train_swd.py train.json val.json 0 0` to start training process.
 
 ## Validation
 In this repo there are a number of validation and anlysis scripts to help you validate and visualize the output of the netowrk.
@@ -30,11 +30,10 @@ In this repo there are a number of validation and anlysis scripts to help you va
 
 ## Results
 
-ShanghaiA MAE: 75.69 [Google Drive](https://drive.google.com/open?id=1Z-atzS5Y2pOd-nEWqZRVBDMYJDreGWHH)
-ShanghaiB MAE: 12.4 [Google Drive](https://drive.google.com/open?id=1zKn6YlLW3Z9ocgPbP99oz7r2nC7_TBXK)
+ShanghaiA MAE: 75.69 [Google Drive](https://drive.google.com/open?id=1P7u3Ox0WJEt43WySzXwmHTuUiUguYd-9)
+ShanghaiB MAE: 12.4 [Google Drive](https://drive.google.com/open?id=1fq0__0ZYunCEOOpv2SmT3vMQkg1SGFgS)
 
 ## References
 
 If you find the CSRNet-SWD useful, please cite our repo. Thank you!
-
 
