@@ -23,17 +23,17 @@ from swd.swd import swd
 parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 
 parser.add_argument('--train_json', metavar='TRAIN',
-                    help='path to train json',default='/home/eldan/Python_Projects/CSRNet-pytorch-master/part_B_train.json')
+                    help='path to train json',default='/home/eldan/Python_Projects/CSRNet-pytorch-master/part_A_train.json')
 parser.add_argument('--test_json', metavar='TEST',
-                    help='path to test json',default='/home/eldan/Python_Projects/CSRNet-pytorch-master/part_B_val.json')
+                    help='path to test json',default='/home/eldan/Python_Projects/CSRNet-pytorch-master/part_A_val.json')
 
 parser.add_argument('--pre', '-p', metavar='PRETRAINED',type=str,
-                    help='path to the pretrained model',default = '/home/eldan/Python_Projects/CSRNet-pytorch-master/adam_swd_lr_1e-7_part_b_checkpoint.pth.tar')
+                    help='path to the pretrained model',default = '')
 parser.add_argument('--gpu',metavar='GPU', type=str,
                     help='GPU id to use.',default='0')
 
 parser.add_argument('--task',metavar='TASK', type=str,
-                    help='task id to use.',default='adam_swd_lr_1e-7_part_b_')
+                    help='task id to use.',default='swd_lr_1e-8_part_a_')
 
 def main():
     global args, best_prec1
@@ -41,13 +41,13 @@ def main():
     best_prec1 = 1e9
 
     args = parser.parse_args()
-    args.original_lr = 1e-7
-    args.lr = 1e-7
+    args.original_lr = 1e-8
+    args.lr = 1e-8
     args.batch_size = 1
     args.momentum = 0.95
     args.decay = 5 * 1e-4
     args.start_epoch = 0
-    args.epochs = 400
+    args.epochs = 400*4
     args.steps = [-1, 30, 100, 150]
     args.scales = [1, 0.1, 0.1, 0.1]
     args.workers = 8
@@ -59,7 +59,6 @@ def main():
         train_list = json.load(outfile)
     with open(args.test_json, 'r') as outfile:
         val_list = json.load(outfile)
-
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     torch.cuda.manual_seed(args.seed)
 
@@ -69,11 +68,10 @@ def main():
 
     # criterion = nn.MSELoss(size_average=False).cuda()
     criterion = swd
-    optimizer = torch.optim.Adam(model.parameters(), args.lr,
+    # optimizer = torch.optim.Adam(model.parameters(), args.lr)
+    optimizer = torch.optim.SGD(model.parameters(), args.lr,
+                                momentum=args.momentum,
                                 weight_decay=args.decay)
-    # optimizer = torch.optim.SGD(model.parameters(), args.lr,
-    #                             momentum=args.momentum,
-    #                             weight_decay=args.decay)
 
     if args.pre:
         if os.path.isfile(args.pre):
@@ -87,13 +85,29 @@ def main():
                   .format(args.pre, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.pre))
-
+    data_loader = dataset.listDataset(train_list,
+                                     shuffle=True,
+                                     transform=transforms.Compose([
+                                         transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                                     std=[0.229, 0.224, 0.225]),
+                                     ]),
+                                     train=True,
+                                     seen=model.seen,
+                                     batch_size=args.batch_size,
+                                     num_workers=args.workers)
+    data_loader_val = dataset.listDataset(val_list,
+                                         shuffle=False,
+                                         transform=transforms.Compose([
+                                             transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                                         std=[0.229, 0.224, 0.225]),
+                                         ]), train=False)
     for epoch in range(args.start_epoch, args.epochs):
         adjust_learning_rate(optimizer, epoch)
 
-        train(train_list, model, criterion, optimizer, epoch)
-        prec1 = validate(val_list, model, criterion,args.task)
-
+        train(model, criterion, optimizer, epoch, data_loader)
+        prec1 = validate(model, args.task, data_loader_val)
+        data_loader.shuffle()
+        data_loader_val.shuffle()
         is_best = prec1 < best_prec1
         best_prec1 = min(prec1, best_prec1)
         print(' * best MAE {mae:.3f} '
@@ -107,22 +121,13 @@ def main():
         }, is_best, args.task)
 
 
-def train(train_list, model, criterion, optimizer, epoch):
+def train(model, criterion, optimizer, epoch,data_loader):
     losses = AverageMeter()
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
     train_loader = torch.utils.data.DataLoader(
-        dataset.listDataset(train_list,
-                            shuffle=True,
-                            transform=transforms.Compose([
-                                transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                                            std=[0.229, 0.224, 0.225]),
-                            ]),
-                            train=True,
-                            seen=model.seen,
-                            batch_size=args.batch_size,
-                            num_workers=args.workers),
+        data_loader,
         batch_size=args.batch_size)
     print('epoch %d, processed %d samples, lr %.10f' % (epoch, epoch * len(train_loader.dataset), args.lr))
 
@@ -140,7 +145,7 @@ def train(train_list, model, criterion, optimizer, epoch):
         target = Variable(target)
 
         loss = criterion(output, target)
-        loss.requires_grad = True
+        # loss.requires_grad = True
         losses.update(loss.item(), img.size(0))
         optimizer.zero_grad()
         loss.backward()
@@ -159,15 +164,10 @@ def train(train_list, model, criterion, optimizer, epoch):
                 data_time=data_time, loss=losses))
 
 
-def validate(val_list, model, criterion,model_name):
+def validate(model,model_name,data_loader_val):
     print('begin test')
     test_loader = torch.utils.data.DataLoader(
-        dataset.listDataset(val_list,
-                            shuffle=False,
-                            transform=transforms.Compose([
-                                transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                                            std=[0.229, 0.224, 0.225]),
-                            ]), train=False),
+        data_loader_val,
         batch_size=args.batch_size)
 
     model.eval()
@@ -181,7 +181,7 @@ def validate(val_list, model, criterion,model_name):
         # output = cv2.resize(np.array(output.data.cpu()[0, 0, :, :]),
         #                     (int(groundtruth.shape[1]), int(groundtruth.shape[0])), interpolation=cv2.INTER_CUBIC) / 64
         if not i:
-            base_name = os.path.dirname(os.path.abspath(__file__))
+            base_name = os.path.join(os.path.dirname(os.path.abspath(__file__)),'CSRNet-pytorch-master','training_models')
             os.makedirs(base_name+model_name,exist_ok=True)
             plt.imsave(base_name+model_name+'/output',np.array(output.data.cpu())[0,0,:,:])
             plt.imsave(base_name+model_name + '/gt', np.array(target.data.cpu())[0, :, :])
