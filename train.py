@@ -84,14 +84,29 @@ def main():
                   .format(args.pre, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.pre))
-            
+    data_loader = dataset.listDataset(train_list,
+                                      shuffle=True,
+                                      transform=transforms.Compose([
+                                          transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                                      std=[0.229, 0.224, 0.225]),
+                                      ]),
+                                      train=True,
+                                      seen=model.seen,
+                                      batch_size=args.batch_size,
+                                      num_workers=args.workers)
+    data_loader_val = dataset.listDataset(val_list,
+                                          shuffle=False,
+                                          transform=transforms.Compose([
+                                              transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                                          std=[0.229, 0.224, 0.225]),
+                                          ]), train=False)
     for epoch in range(args.start_epoch, args.epochs):
-        
         adjust_learning_rate(optimizer, epoch)
-        
-        train(train_list, model, criterion, optimizer, epoch)
-        prec1 = validate(val_list, model, criterion)
-        
+
+        train(model, criterion, optimizer, epoch, data_loader)
+        prec1 = validate(model, args.task, data_loader_val)
+        data_loader.shuffle()
+        data_loader_val.shuffle()
         is_best = prec1 < best_prec1
         best_prec1 = min(prec1, best_prec1)
         print(' * best MAE {mae:.3f} '
@@ -101,105 +116,93 @@ def main():
             'arch': args.pre,
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
-            'optimizer' : optimizer.state_dict(),
-        }, is_best,args.task)
+            'optimizer': optimizer.state_dict(),
+        }, is_best, args.task)
 
-def train(train_list, model, criterion, optimizer, epoch):
-    
+
+def train(model, criterion, optimizer, epoch, data_loader):
     losses = AverageMeter()
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    
-    
+
     train_loader = torch.utils.data.DataLoader(
-        dataset.listDataset(train_list,
-                       shuffle=True,
-                       transform=transforms.Compose([
-                       transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                   ]), 
-                       train=True, 
-                       seen=model.seen,
-                       batch_size=args.batch_size,
-                       num_workers=args.workers),
+        data_loader,
         batch_size=args.batch_size)
     print('epoch %d, processed %d samples, lr %.10f' % (epoch, epoch * len(train_loader.dataset), args.lr))
-    
+
     model.train()
     end = time.time()
-    
-    for i,(img, target)in enumerate(train_loader):
+
+    for i, (img, target) in enumerate(train_loader):
         data_time.update(time.time() - end)
-        
+
         img = img.cuda()
         img = Variable(img)
         output = model(img)
-        
-        
-        
-        
+
         target = target.type(torch.FloatTensor).unsqueeze(0).cuda()
         target = Variable(target)
-        
-        
+
         loss = criterion(output, target)
-        loss.requres_grad = True
+        # loss.requires_grad = True
         losses.update(loss.item(), img.size(0))
         optimizer.zero_grad()
         loss.backward()
-        optimizer.step()    
-        
+        optimizer.step()
+
         batch_time.update(time.time() - end)
         end = time.time()
-        
+
         if i % args.print_freq == 0:
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  .format(
-                   epoch, i, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses))
-    
-def validate(val_list, model, criterion):
-    print ('begin test')
+                .format(
+                epoch, i, len(train_loader), batch_time=batch_time,
+                data_time=data_time, loss=losses))
+
+
+def validate(model, model_name, data_loader_val):
+    print('begin test')
     test_loader = torch.utils.data.DataLoader(
-    dataset.listDataset(val_list,
-                   shuffle=False,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                   ]),  train=False),
-    batch_size=args.batch_size)    
-    
+        data_loader_val,
+        batch_size=args.batch_size)
+
     model.eval()
-    
+
     mae = 0
-    
-    for i,(img, target) in enumerate(test_loader):
+
+    for i, (img, target) in enumerate(test_loader):
         img = img.cuda()
         img = Variable(img)
         output = model(img)
-        
-        mae += abs(output.data.sum()-target.sum().type(torch.FloatTensor).cuda())
-        
-    mae = mae/len(test_loader)    
-    print(' * MAE {mae:.3f} '
-              .format(mae=mae))
+        # output = cv2.resize(np.array(output.data.cpu()[0, 0, :, :]),
+        #                     (int(groundtruth.shape[1]), int(groundtruth.shape[0])), interpolation=cv2.INTER_CUBIC) / 64
+        if not i:
+            base_name = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'CSRNet-pytorch-master',
+                                     'training_models')
+            os.makedirs(base_name + model_name, exist_ok=True)
+            plt.imsave(base_name + model_name + '/output', np.array(output.data.cpu())[0, 0, :, :])
+            plt.imsave(base_name + model_name + '/gt', np.array(target.data.cpu())[0, :, :])
+        mae += abs(output.data.sum() - target.sum().type(torch.FloatTensor).cuda())
 
-    return mae    
-        
+    mae = mae / len(test_loader)
+    print(' * MAE {mae:.3f} '
+          .format(mae=mae))
+
+    return mae
+
+
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    
-    
+
     args.lr = args.original_lr
-    
+
     for i in range(len(args.steps)):
-        
+
         scale = args.scales[i] if i < len(args.scales) else 1
-        
-        
+
         if epoch >= args.steps[i]:
             args.lr = args.lr * scale
             if epoch == args.steps[i]:
@@ -208,9 +211,12 @@ def adjust_learning_rate(optimizer, epoch):
             break
     for param_group in optimizer.param_groups:
         param_group['lr'] = args.lr
-        
+    print('reduced lr to:', args.lr)
+
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self):
         self.reset()
 
@@ -224,7 +230,8 @@ class AverageMeter(object):
         self.val = val
         self.sum += val * n
         self.count += n
-        self.avg = self.sum / self.count    
-    
+        self.avg = self.sum / self.count
+
+
 if __name__ == '__main__':
-    main()        
+    main()
