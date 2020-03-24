@@ -109,7 +109,7 @@ def extract_patches(pyramid_layer, slice_indices,
 
 def swd(image1, image2,
         n_pyramids=None, slice_size=7, n_descriptors=128,
-        n_repeat_projection=128, proj_per_repeat=4, device="cpu", return_by_resolution=False,
+        n_repeat_projection=128, proj_per_repeat=4, device="cuda", return_by_resolution=False,
         pyramid_batchsize=128):
     # n_repeat_projectton * proj_per_repeat = 512
     # Please change these values according to memory usage.
@@ -126,46 +126,46 @@ def swd(image1, image2,
             print(np.log2(image1.size(2) // 16))
             print(np.rint(np.log2(image1.size(2) // 16)))
 
-    with torch.no_grad():
+    # with torch.no_grad():
     # minibatch laplacian pyramid for cuda memory reasons
-        pyramid1 = minibatch_laplacian_pyramid(image1, n_pyramids, pyramid_batchsize, device=device)
-        pyramid2 = minibatch_laplacian_pyramid(image2, n_pyramids, pyramid_batchsize, device=device)
-        result = []
+    pyramid1 = minibatch_laplacian_pyramid(image1, n_pyramids, pyramid_batchsize, device=device)
+    pyramid2 = minibatch_laplacian_pyramid(image2, n_pyramids, pyramid_batchsize, device=device)
+    result = []
 
-        for i_pyramid in range(n_pyramids + 1):
-            # indices
-            n = (pyramid1[i_pyramid].size(2) - 6) * (pyramid1[i_pyramid].size(3) - 6)
-            indices = torch.randperm(n)[:n_descriptors]
+    for i_pyramid in range(n_pyramids + 1):
+        # indices
+        n = (pyramid1[i_pyramid].size(2) - 6) * (pyramid1[i_pyramid].size(3) - 6)
+        indices = torch.randperm(n)[:n_descriptors]
 
-            # extract patches on CPU
-            # patch : 2rank (n_image*n_descriptors, slice_size**2*ch)
-            p1 = extract_patches(pyramid1[i_pyramid], indices,
-                                 slice_size=slice_size, device="cpu")
-            p2 = extract_patches(pyramid2[i_pyramid], indices,
-                                 slice_size=slice_size, device="cpu")
+        # extract patches on CPU
+        # patch : 2rank (n_image*n_descriptors, slice_size**2*ch)
+        p1 = extract_patches(pyramid1[i_pyramid], indices,
+                             slice_size=slice_size, device=device)
+        p2 = extract_patches(pyramid2[i_pyramid], indices,
+                             slice_size=slice_size, device=device)
 
-            p1, p2 = p1.to(device), p2.to(device)
+        p1, p2 = p1.to(device), p2.to(device)
 
-            distances = []
-            for j in range(n_repeat_projection):
-                # random
-                rand = torch.randn(p1.size(1), proj_per_repeat).to(device)  # (slice_size**2*ch)
-                rand = rand / torch.std(rand, dim=0, keepdim=True)  # noramlize
-                # projection
-                proj1 = torch.matmul(p1, rand)
-                proj2 = torch.matmul(p2, rand)
-                proj1, _ = torch.sort(proj1, dim=0)
-                proj2, _ = torch.sort(proj2, dim=0)
-                d = torch.abs(proj1 - proj2)
-                distances.append(torch.mean(d))
+        distances = []
+        for j in range(n_repeat_projection):
+            # random
+            rand = torch.randn(p1.size(1), proj_per_repeat).to(device)  # (slice_size**2*ch)
+            rand = rand / torch.std(rand, dim=0, keepdim=True)  # noramlize
+            # projection
+            proj1 = torch.matmul(p1, rand)
+            proj2 = torch.matmul(p2, rand)
+            proj1, _ = torch.sort(proj1, dim=0)
+            proj2, _ = torch.sort(proj2, dim=0)
+            d = torch.abs(proj1 - proj2)
+            distances.append(torch.mean(d))
 
-            # swd
-            result.append(torch.mean(torch.stack(distances)))
+        # swd
+        result.append(torch.mean(torch.stack(distances)))
 
-        # average over resolution
-        result = torch.stack(result) * 1e3
-        if return_by_resolution:
-            return result.cpu()
-        else:
-            a = torch.mean(result).cpu()
-            return a
+    # average over resolution
+    result = torch.stack(result) * 1e3
+    if return_by_resolution:
+        return result.to(device)
+    else:
+        a = torch.mean(result).to(device)
+        return a
