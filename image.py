@@ -7,7 +7,8 @@ from PIL import ImageStat
 import cv2
 import scipy.signal as sg
 
-def load_data(img_path,train = True):
+def load_data(args):
+    img_path, train = args
     gt_path = img_path.replace('.jpg','.h5').replace('images','ground')
     img = Image.open(img_path).convert('RGB')
     gt_file = h5py.File(gt_path)
@@ -31,12 +32,12 @@ def load_data(img_path,train = True):
         
         
         
-    if random.random()>0.8:
-        target = np.fliplr(target)
-        img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        if random.random()>0.8:
+            target = np.fliplr(target)
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
 
     sum_convovled_kernel = np.ones((8, 8))
     # target = cv2.resize(target,(int(target.shape[1]/8),int(target.shape[0]/8)),interpolation = cv2.INTER_CUBIC)*64
     target = sg.convolve2d(target, sum_convovled_kernel[::-1, ::-1], mode='valid')[::8, ::8]
     
-    return img,target
+    return img, target
